@@ -757,6 +757,7 @@ bgpq4_print_aspath(FILE* f, struct bgpq_expander* b)
 	case V_JUNIPER:
 		return bgpq4_print_juniper_aspath(f, b);
 	case V_CISCO:
+    case V_ARISTA_SHORT:
 		return bgpq4_print_cisco_aspath(f, b);
 	case V_CISCO_XR:
 		return bgpq4_print_cisco_xr_aspath(f, b);
@@ -786,6 +787,7 @@ bgpq4_print_oaspath(FILE* f, struct bgpq_expander* b)
 	case V_JUNIPER:
 		return bgpq4_print_juniper_oaspath(f, b);
 	case V_CISCO:
+    case V_ARISTA_SHORT:
 		return bgpq4_print_cisco_oaspath(f, b);
 	case V_CISCO_XR:
 		return bgpq4_print_cisco_xr_oaspath(f, b);
@@ -1124,6 +1126,43 @@ checkSon:
 
 static char* bname = NULL;
 static int   seq = 0;
+
+void
+bgpq4_print_aprefix(struct sx_radix_node* n, void* ff)
+{
+	char prefix[128], seqno[16] = "";
+	FILE* f = (FILE*)ff;
+
+	if (!f)
+		f = stdout;
+
+	if (n->isGlue)
+		goto checkSon;
+
+	sx_prefix_snprintf(n->prefix,prefix,sizeof(prefix));
+
+	if (seq)
+		snprintf(seqno, sizeof(seqno), "seq %i", seq++);
+
+	if (n->isAggregate) {
+		if (n->aggregateLow>n->prefix->masklen) {
+			fprintf(f,"%s permit %s ge %u le %u\n",
+			    seqno, prefix,
+			    n->aggregateLow, n->aggregateHi);
+		} else {
+			fprintf(f,"%s permit %s le %u\n",
+			    seqno, prefix, n->aggregateHi);
+		}
+	} else {
+		fprintf(f,"%s permit %s\n", seqno, prefix);
+	}
+
+checkSon:
+	if (n->son)
+		bgpq4_print_aprefix(n->son,ff);
+}
+
+
 
 void
 bgpq4_print_cprefix(struct sx_radix_node* n, void* ff)
@@ -1562,6 +1601,21 @@ bgpq4_print_cisco_prefixlist(FILE* f, struct bgpq_expander* b)
 }
 
 int
+bgpq4_print_arista_compact_prefixlist(FILE* f, struct bgpq_expander* b)
+{
+	bname = b->name ? b->name : "NN";
+	seq = b->sequence;
+
+	if (!sx_radix_tree_empty(b->tree)) {
+		sx_radix_tree_foreach(b->tree, bgpq4_print_aprefix, f);
+	} else {
+		fprintf(f, "! generated prefix-list is empty\n");
+	}
+
+	return 0;
+}
+
+int
 bgpq4_print_ciscoxr_prefixlist(FILE* f, struct bgpq_expander* b)
 {
 	bname = b->name ? b->name : "NN";
@@ -1842,6 +1896,8 @@ bgpq4_print_prefixlist(FILE* f, struct bgpq_expander* b)
 		return bgpq4_print_juniper_prefixlist(f, b);
 	case V_CISCO:
 		return bgpq4_print_cisco_prefixlist(f, b);
+    case V_ARISTA_SHORT:
+		return bgpq4_print_arista_compact_prefixlist(f, b);
 	case V_CISCO_XR:
 		return bgpq4_print_ciscoxr_prefixlist(f, b);
 	case V_JSON:
@@ -1872,6 +1928,7 @@ bgpq4_print_eacl(FILE* f, struct bgpq_expander* b)
 	case V_JUNIPER:
 		return bgpq4_print_juniper_routefilter(f, b);
 	case V_CISCO:
+    case V_ARISTA_SHORT:
 		return bgpq4_print_cisco_eacl(f, b);
 	case V_CISCO_XR:
 		sx_report(SX_FATAL, "unreachable point\n");
